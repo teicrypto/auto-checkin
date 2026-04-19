@@ -14,13 +14,13 @@ import { log, logResult } from "../utils/logger.js";
 // CONFIG — ★ CHỈNH 2 DÒNG NÀY sau khi inspect Network tab
 // ─────────────────────────────────────────────────────────────
 const PLATFORM = "onvoyage";
-const BASE_URL  = "https://app.onvoyage.ai";
+const BASE_URL  = "https://onvoyage-backend-954067898723.us-central1.run.app";
 
 // ★ Endpoint check-in — xem tab "Headers" → Request URL
 // Các pattern hay gặp:
 //   /api/user/checkin   /api/checkin   /api/daily-checkin
 //   /api/v1/checkin     /api/tasks/checkin  /api/rewards/checkin
-const CHECKIN_ENDPOINT = `${BASE_URL}/api/user/checkin`;
+const CHECKIN_ENDPOINT = `${BASE_URL}/api/v1/task/checkin`;
 
 // ★ Body — xem tab "Payload". {} nếu trống, null nếu không có body
 const CHECKIN_BODY = {};
