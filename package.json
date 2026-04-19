@@ -1,0 +1,19 @@
+{
+  "name": "auto-checkin",
+  "version": "1.0.0",
+  "description": "Auto daily check-in for multiple web3/airdrop platforms",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js",
+    "onvoyage": "node index.js onvoyage",
+    "cedomis": "node index.js cedomis"
+  },
+  "dependencies": {
+    "node-fetch": "^3.3.2",
+    "dotenv": "^16.4.5"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

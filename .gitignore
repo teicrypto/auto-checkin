@@ -1,0 +1,16 @@
+node_modules/
+
+# ⚠️ QUAN TRỌNG: Không bao giờ commit file cookie thật
+cookies.txt
+
+# Logs
+*.log
+logs/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/

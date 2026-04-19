@@ -1,0 +1,8 @@
+# cookies.example.txt
+# Copy file này thành cookies.txt rồi điền cookie thật vào
+# Format: tên_kèo=giá_trị_cookie
+# Mỗi kèo 1 dòng, không có dấu cách xung quanh dấu =
+# Dòng bắt đầu bằng # là comment, sẽ bị bỏ qua
+
+onvoyage=your_onvoyage_cookie_here
+cedomis=your_cedomis_cookie_here
