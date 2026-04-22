@@ -1,256 +1,268 @@
-# PROMPT TẠO SKILL CHECK-IN MỚI — FULL ANTI-DETECTION
-# Dùng cho chat mới — copy toàn bộ, paste vào chat, điền PHẦN 4
+# PROMPT TẠO SKILL CHECK-IN MỚI — PLAYWRIGHT STEALTH
+# Dùng cho chat mới — copy toàn bộ, paste vào chat, điền PHẦN 5
 
 ════════════════════════════════════════════════════════════════
 PHẦN 1 — CONTEXT PROJECT
 ════════════════════════════════════════════════════════════════
 
-Project auto check-in Node.js (ESM, Node 18+):
+Project auto check-in Node.js (ESM, Node 18+), engine Playwright headless:
 
 auto-checkin/
 ├── index.js
+├── setup.js              # chạy 1 lần sau clone: node setup.js
 ├── cookies.txt           # tên_kèo=Bearer_token hoặc cookie_string
 ├── utils/
-│   ├── loadCookies.js    # export getAuth(platform)
-│   │                     #   → { type, value, headers }
-│   └── logger.js         # export log(platform, msg, type), logResult(...)
+│   ├── browser.js        # Playwright stealth — createContext, createPage, humanDelay, humanClick, closeBrowser
+│   ├── loadCookies.js    # getAuth(platform) → { type, value, headers }
+│   └── logger.js         # log(platform, msg, type), logResult(platform, success, detail)
 └── auto/
     └── [tên_kèo].js      # FILE CẦN TẠO
 
 getAuth() tự động detect:
-  eyJ... (3 phần ngăn bởi .)  → { type:"bearer", headers:{ authorization:"Bearer ..." } }
-  _ga=...; session=...        → { type:"cookie", headers:{ cookie:"..." } }
+  eyJ...x.y.z  → { type:"bearer", headers:{ authorization:"Bearer ..." } }
+  _ga=...;...  → { type:"cookie", headers:{ cookie:"..." } }
 
 ════════════════════════════════════════════════════════════════
-PHẦN 2 — QUY TẮC CODE BẮT BUỘC
+PHẦN 2 — MÔI TRƯỜNG CHẠY
 ════════════════════════════════════════════════════════════════
 
-IMPORTS:
+Playwright chạy headless (không cần GUI/màn hình):
+  - headless: true trong browser.js
+  - Chạy được trên: VPS Linux, Docker, GitHub Actions, cron job
+  - Không cần Xvfb hay display server
+  - node setup.js sẽ tự cài Chromium kèm system dependencies
+
+════════════════════════════════════════════════════════════════
+PHẦN 3 — CẤU TRÚC SKILL BẮT BUỘC
+════════════════════════════════════════════════════════════════
+
+IMPORTS — đúng 3 dòng:
   import { getAuth } from "../utils/loadCookies.js";
   import { log, logResult } from "../utils/logger.js";
+  import { createContext, createPage, humanDelay } from "../utils/browser.js";
 
 EXPORT:
   export async function run() { ... }
 
-AUTH:
-  const auth = getAuth(PLATFORM);
-  const headers = { ...auth.headers, ...browserHeaders(), ...extraHeaders };
-
-RESPONSE — handle đủ 401/403/429/timeout/200/default
-
-TASK CHECK — function checkTasks(headers) riêng, chạy sau check-in
-
-RETURN:
-  { success, platform, newTasks:[], data/reason }
-
-════════════════════════════════════════════════════════════════
-PHẦN 3 — ANTI-DETECTION (ÁP DỤNG CHO MỌI SKILL)
-════════════════════════════════════════════════════════════════
-
-Viết skill với đầy đủ các kỹ thuật sau:
-
-── A. BROWSER FINGERPRINT HEADERS ──────────────────────────────
-
-Tạo function browserHeaders() với headers NHẤT QUÁN, không mâu thuẫn nhau.
-Quan trọng: sec-ch-ua phải khớp với user-agent cùng version Chrome.
-
-const CHROME_VERSION = "147";  // đổi theo DevTools thực tế
-const PLATFORM_OS    = "Windows";
-
-function browserHeaders() {
-  return {
-    // ── Core ──
-    "accept"              : "application/json, text/plain, */*",
-    "accept-encoding"     : "gzip, deflate, br, zstd",
-    "accept-language"     : "en-US,en;q=0.9,vi-VN;q=0.8,vi;q=0.7,fr-FR;q=0.6,fr;q=0.5",
-    "connection"          : "keep-alive",
-
-    // ── Browser fingerprint — phải khớp nhau (version, OS, platform) ──
-    "user-agent"          : `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${CHROME_VERSION}.0.0.0 Safari/537.36`,
-    "sec-ch-ua"           : `"Google Chrome";v="${CHROME_VERSION}", "Not.A/Brand";v="8", "Chromium";v="${CHROME_VERSION}"`,
-    "sec-ch-ua-mobile"    : "?0",
-    "sec-ch-ua-platform"  : `"${PLATFORM_OS}"`,
-    "sec-ch-ua-arch"      : '"x86"',
-    "sec-ch-ua-bitness"   : '"64"',
-    "sec-ch-ua-full-version-list": `"Google Chrome";v="${CHROME_VERSION}.0.0.0", "Not.A/Brand";v="8.0.0.0", "Chromium";v="${CHROME_VERSION}.0.0.0"`,
-
-    // ── Fetch metadata — phải khớp với context request ──
-    "sec-fetch-dest"      : "empty",
-    "sec-fetch-mode"      : "cors",
-    "sec-fetch-site"      : "same-origin",  // ★ đổi "cross-site" nếu backend khác domain
-    "sec-fetch-user"      : "?1",           // chỉ thêm nếu request từ user action (click)
-
-    // ── Priority hint (Chrome 101+) ──
-    "priority"            : "u=1, i",
-  };
-}
-
-── B. HUMAN TIMING — delay ngẫu nhiên giả lập hành vi người dùng ──
-
-// Delay ngẫu nhiên giữa các bước (ms)
-function humanDelay(minMs = 800, maxMs = 2500) {
-  const ms = Math.floor(Math.random() * (maxMs - minMs + 1)) + minMs;
-  return new Promise(r => setTimeout(r, ms));
-}
-
-// Dùng trước khi gọi API check-in:
-await humanDelay(500, 1500);   // giả lập thời gian user nhìn vào trang rồi mới click
-// Dùng giữa các bước multi-step:
-await humanDelay(300, 800);
-
-── C. REQUEST ORDERING — thứ tự header đúng như Chrome thật ──
-
-Node.js fetch() giữ nguyên thứ tự header khai báo.
-Luôn khai báo theo thứ tự Chrome thật gửi:
-  1. :method, :path, :authority (pseudo-headers, tự động)
-  2. content-length / content-type (nếu có body)
-  3. authorization / cookie
-  4. accept
-  5. accept-encoding
-  6. accept-language
-  7. origin
-  8. referer
-  9. user-agent
-  10. sec-ch-ua*
-  11. sec-fetch-*
-  12. priority
-  13. Các header tuỳ chỉnh khác (x-csrf-token...)
-
-── D. SESSION WARMUP — gọi 1 request GET trước khi check-in ──
-
-Trước khi POST check-in, gọi GET trang dashboard hoặc /api/user/me.
-Lý do: trình duyệt thật luôn load trang trước khi user click button.
-Nếu server thấy POST check-in mà không có GET trước → dấu hiệu bot.
-
-async function warmup(headers, baseUrl) {
-  try {
-    await fetch(`${baseUrl}/dashboard`, {
-      method  : "GET",
-      headers : { ...headers, "sec-fetch-dest": "document", "sec-fetch-mode": "navigate", "sec-fetch-site": "none" },
-      signal  : AbortSignal.timeout(8000),
-    });
-    await humanDelay(1000, 2500); // giả lập thời gian trang load xong
-  } catch {
-    // warmup fail không nghiêm trọng, tiếp tục
+PATTERN CHÍNH — gọi API từ bên trong browser (Chrome thật xử lý TLS/HTTP2):
+  async function browserFetch(page, url, options = {}) {
+    const result = await page.evaluate(async ({ url, options }) => {
+      try {
+        const res  = await fetch(url, options);
+        const text = await res.text();
+        return { status: res.status, ok: res.ok, text, headers: Object.fromEntries(res.headers.entries()) };
+      } catch (err) { return { error: err.message }; }
+    }, { url, options });
+    if (result.error) throw new Error(result.error);
+    return {
+      status  : result.status,
+      ok      : result.ok,
+      headers : result.headers,
+      json    : () => { try { return JSON.parse(result.text); } catch { return { _raw: result.text?.slice(0,500) }; } },
+      text    : () => result.text,
+    };
   }
-}
 
-── E. RETRY VỚI BACKOFF — giả lập retry tự nhiên ──
+AUTH INJECTION — thêm header vào mọi request đến backend:
+  await page.route(`${BACKEND_URL}/**`, async (route) => {
+    await route.continue({ headers: { ...route.request().headers(), ...auth.headers } });
+  });
 
-async function fetchWithRetry(url, options, maxRetries = 2) {
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    try {
-      const res = await fetch(url, options);
-      if (res.status === 429) {
-        const wait = parseInt(res.headers.get("retry-after") || "60") * 1000;
-        log(PLATFORM, `Rate limit — chờ ${wait/1000}s...`, "warn");
-        await new Promise(r => setTimeout(r, wait));
-        continue;
-      }
-      return res;
-    } catch (err) {
-      if (attempt === maxRetries) throw err;
-      await humanDelay(2000, 5000); // chờ trước khi retry
-    }
-  }
-}
+FLOW CHUẨN:
+  1. getAuth(PLATFORM)
+  2. createContext() + createPage()
+  3. page.route() inject auth
+  4. page.goto(dashboard, { waitUntil:"domcontentloaded" }) — warmup
+  5. page.mouse.wheel() scroll nhẹ
+  6. humanDelay(1500, 3500)
+  7. humanDelay(200, 600) — trước API call
+  8. browserFetch() check-in
+  9. xử lý 401/403/429/ok
+  10. checkTasks()
+  11. context.close() trong finally
 
-── F. CONTENT-TYPE ĐÚNG ──
+CLEANUP — luôn dùng try/finally:
+  let context, page;
+  try { ... }
+  catch (err) { ... return { success: false } }
+  finally { if (context) await context.close().catch(() => {}); }
+  // KHÔNG gọi closeBrowser() — index.js lo
 
-Không có body   → KHÔNG thêm content-type
-Body JSON       → "content-type": "application/json"
-Body form-data  → "content-type": "application/x-www-form-urlencoded"
-
-Sai content-type là dấu hiệu bot rõ nhất.
-
-── G. ORIGIN & REFERER CHÍNH XÁC ──
-
-Quy tắc:
-  origin  = domain gốc không có trailing slash: "https://app.example.com"
-  referer = trang cụ thể user đang đứng:        "https://app.example.com/dashboard"
-
-Nếu backend khác domain (cross-site):
-  sec-fetch-site = "cross-site"
-  origin vẫn là FRONTEND domain (không phải backend)
+RETURN: { success, platform, newTasks:[], data/reason }
 
 ════════════════════════════════════════════════════════════════
-PHẦN 4 — THÔNG TIN KÈO MỚI ★ ĐIỀN VÀO ĐÂY
+PHẦN 4 — ANTI-DETECTION (tích hợp sẵn trong browser.js)
 ════════════════════════════════════════════════════════════════
+
+Đã có sẵn, KHÔNG cần viết lại trong skill:
+  ✅ navigator.webdriver = undefined
+  ✅ Fake plugins, hardwareConcurrency, deviceMemory, connection
+  ✅ window.chrome runtime object
+  ✅ Viewport ngẫu nhiên 1366-1920px
+  ✅ Timezone Asia/Ho_Chi_Minh, locale en-US
+  ✅ --disable-blink-features=AutomationControlled
+  ✅ Block ads/analytics/sentry/hotjar
+  ✅ HTTP/2 + TLS fingerprint Chrome thật
+  ✅ Human mouse Bezier curve
+
+Trong skill CHỈ cần thêm:
+  humanDelay() đúng chỗ + scroll + mouse.move() trước API call
+
+════════════════════════════════════════════════════════════════
+PHẦN 5 — THÔNG TIN KÈO MỚI ★ ĐIỀN VÀO ĐÂY
+════════════════════════════════════════════════════════════════
+
+── BƯỚC 0: KIỂM TRA TRANG TRƯỚC ────────────────────────────────
+
+Trước khi điền, hãy vào trang web của kèo và:
+  1. Xem trang dùng anti-bot gì (Cloudflare/DataDome/không có)
+  2. Xác định flow login/auth
+  3. Mở DevTools → Network → bấm nút Check-in để lấy thông tin
+
+Nếu cần, hãy fetch trang chủ để phân tích:
+  URL trang chủ/dashboard: [ ]
+
+── THÔNG TIN CƠ BẢN ────────────────────────────────────────────
 
 Tên kèo (chữ thường, không dấu):
   [ ]
 
-── CHECK-IN REQUEST (DevTools → Network → Fetch/XHR → click request check-in) ──
-
-:authority (backend domain, để trống nếu cùng domain frontend):
+Frontend URL (trang đang mở trên browser):
   [ ]
 
-Frontend URL (trang web bạn đang mở):
+── CHECK-IN REQUEST ─────────────────────────────────────────────
+
+Cách lấy: F12 → Network → Fetch/XHR → bấm nút Check-in → click request mới xuất hiện
+
+:authority (nếu khác frontend URL):
   [ ]
 
 :path:
-  [ ]
+  [ ]  VD: /api/v1/task/checkin
 
 :method:
-  [ ] POST  [ ] GET
+  [ ] POST   [ ] GET   [ ] PUT   [ ] PATCH
 
 Content-Length:
-  [ ] 0 (không có body)
-  [ ] Có body → paste nội dung tab Payload:
+  [ ] 0 = không có body
+  [ ] Có body → tab Payload → paste nội dung:
+      [ ]
 
-Body:
-  [ ]
-
-Loại auth (nhìn vào Request Headers):
-  [ ] Authorization: Bearer eyJ...
-  [ ] cookie: _ga=...
+Loại auth (tab Headers → Request Headers):
+  [ ] Authorization: Bearer eyJ...    → copy phần sau "Bearer "
+  [ ] cookie: _ga=...                 → copy toàn bộ value
   [ ] Khác: [ ]
 
-Chrome version (xem trong sec-ch-ua):
-  [ ] "Google Chrome";v="___"
+Chrome version (tìm trong sec-ch-ua):
+  "Google Chrome";v="[ ]"
 
 Sec-Fetch-Site:
-  [ ] same-origin   [ ] cross-site
+  [ ] same-origin   (backend cùng domain frontend)
+  [ ] cross-site    (backend khác domain)
 
-Header đặc biệt ngoài các header chuẩn (x-csrf-token, x-api-key...):
+Header đặc biệt ngoài các header chuẩn:
   [ ] Không có
-  [ ] Có: [ ]
+  [ ] Có: [ ]   VD: x-csrf-token, x-api-key, x-request-id
 
-── TASK LIST (reload trang dashboard → tìm GET request trả về array tasks) ──
+── RESPONSE CHECK-IN (tab Preview) ─────────────────────────────
 
-:path task list:
+Response khi THÀNH CÔNG — paste JSON:
+  [ ]
+
+Response khi ĐÃ CHECK-IN RỒI — paste JSON (nếu biết):
+  [ ]
+
+Field chứa điểm/reward (nếu thấy):
+  [ ]   VD: data.points, reward, tokens
+
+── TASK LIST ────────────────────────────────────────────────────
+
+Cách lấy: reload trang dashboard → tìm GET request trả về array tasks[]
+Tab Preview phải có dạng: { data: { tasks: [...] } } hoặc { tasks: [...] }
+
+Path tìm được:
   [ ] Không tìm được
-  [ ] Tìm được: [ ]
+  [ ] Tìm được: [ ]   VD: /api/v1/task/list
 
-Response task list (tab Preview — paste để biết field tên, status, reward):
+Response structure — paste JSON mẫu (để biết field tên, status, reward):
   [ ]
 
-── RESPONSE CHECK-IN ──
+── ANTI-BOT ─────────────────────────────────────────────────────
 
-Response thành công (tab Preview):
-  [ ]
+Trang có Cloudflare không? (thấy "Checking your browser..." khi vào lần đầu)
+  [ ] Không   [ ] Có → cần xử lý thêm
 
-Response đã check-in rồi (nếu biết):
-  [ ]
+Trang có yêu cầu CAPTCHA không?
+  [ ] Không   [ ] Có
+
+════════════════════════════════════════════════════════════════
+PHẦN 6 — HƯỚNG DẪN LẤY THÔNG TIN TỪ DEVTOOLS
+════════════════════════════════════════════════════════════════
+
+Nếu chưa biết cách lấy thông tin, làm theo các bước sau:
+
+① MỞ DEVTOOLS ĐÚNG CÁCH
+  1. Vào trang dashboard (đã đăng nhập)
+  2. F12 (hoặc Ctrl+Shift+I)
+  3. Click tab "Network"
+  4. Click filter "Fetch/XHR"
+  5. Nếu list đang có nhiều request → click biểu tượng 🚫 (clear) để xoá hết
+
+② BẮT REQUEST CHECK-IN
+  6. Bấm nút CHECK-IN trên trang
+  7. Thấy 1-3 dòng mới xuất hiện trong Network panel
+  8. Tìm dòng có tên chứa: "check", "checkin", "daily", "task", "reward"
+     Method thường là POST, Status 200
+
+③ LẤY THÔNG TIN (click vào dòng đó)
+
+  Tab "Headers":
+    Kéo xuống "Request Headers"
+    :authority → backend domain (nếu khác frontend)
+    :path      → endpoint
+    :method    → POST/GET
+    Authorization: Bearer eyJ... → copy phần sau "Bearer "
+       HOẶC cookie: → copy toàn bộ value
+    sec-ch-ua: "Google Chrome";v="147" → lấy số version
+    sec-fetch-site: same-origin/cross-site
+    Header lạ khác → ghi lại hết
+
+  Tab "Payload" (hoặc "Request"):
+    Nếu có nội dung → paste vào CHECKIN_BODY
+    Nếu trống/không có tab → Content-Length: 0, body = null
+
+  Tab "Preview" (hoặc "Response"):
+    Xem JSON trả về → ghi lại structure
+
+④ LẤY TASK LIST
+  9. Reload trang (F5) trong khi DevTools đang mở
+  10. Tìm GET request có response là array tasks[]
+      Tab Preview phải thấy: { tasks: [...] } hoặc { data: { tasks: [...] } }
+  11. Lấy :path của request đó
+
+⑤ COPY AS CURL (cách nhanh nhất — paste tất cả vào đây)
+  Chuột phải vào request → Copy → "Copy as cURL (bash)"
+  Paste vào đây (xoá phần giá trị Authorization/cookie trước khi paste)
 
 ════════════════════════════════════════════════════════════════
 YÊU CẦU OUTPUT
 ════════════════════════════════════════════════════════════════
 
-1. Viết file auto/[tên_kèo].js với ĐẦY ĐỦ các kỹ thuật PHẦN 3:
-   - function browserHeaders() với version khớp DevTools
-   - function humanDelay() + dùng trước check-in và giữa các bước
-   - function warmup() + gọi trước check-in
-   - function fetchWithRetry() + dùng cho request check-in
-   - Header order đúng thứ tự Chrome
-   - content-type chỉ thêm khi có body
-   - origin/referer chính xác
-   - function checkTasks() sau check-in
+1. Nếu URL trang chủ được cung cấp → fetch trang đó trước để:
+   - Xác nhận trang có dùng Cloudflare/anti-bot không
+   - Tìm thêm thông tin về API structure nếu có docs public
+   - Hướng dẫn cụ thể hơn nếu cần
 
-2. Nếu thiếu thông tin → ghi // TODO: ... thay vì tự đoán
+2. Viết file auto/[tên_kèo].js theo đúng PHẦN 3:
+   - browserFetch() pattern
+   - page.route() inject auth
+   - humanDelay() đúng chỗ + scroll + mouse.move()
+   - checkTasks() riêng
+   - try/finally đóng context
+   - Không gọi closeBrowser()
 
-3. Không dùng thư viện ngoài (chỉ fetch native + utils/)
+3. Nếu thiếu thông tin → ghi // TODO: ... thay vì tự đoán
 
-4. Cuối file có comment:
-   // SETUP: tên_kèo=eyJ... hoặc tên_kèo=cookie_string
-   // Token hết hạn → lấy lại từ DevTools → Authorization header
+4. Cuối file comment: SETUP cookies.txt + cách lấy token
+
+5. Nếu trang có Cloudflare → cảnh báo và hướng dẫn thêm cách xử lý
