@@ -1,21 +1,20 @@
 // ============================================================
 // auto/cedomis.js — Auto Check-in cho cedomis.xyz
-// Dùng Next.js Server Action (không phải REST API)
+// Dùng Playwright thật + intercept Next.js Server Action
 // Auth: cookie auth-token=eyJ...
 // ============================================================
 
-import { getAuth }        from "../utils/loadCookies.js";
-import { log, logResult } from "../utils/logger.js";
+import { getAuth }                               from "../utils/loadCookies.js";
+import { log, logResult }                        from "../utils/logger.js";
+import { createContext, createPage, humanDelay } from "../utils/browser.js";
 
 // ── CONFIG ──────────────────────────────────────────────────
 const PLATFORM = "cedomis";
 const BASE_URL  = "https://cedomis.xyz";
 
-// Next-Action hash — lấy từ DevTools → Request Headers → Next-Action
+// Next-Action hash — nếu thay đổi, lấy lại từ:
+// DevTools → Network → POST /dashboard → Request Headers → Next-Action
 const CHECKIN_ACTION = "609a85ff31b8a14390bfc4c69d4e03f130ebabea41";
-
-// Next-Router-State-Tree — lấy từ DevTools (đã encode URL)
-const ROUTER_STATE   = "%5B%22%22%2C%7B%22children%22%3A%5B%22dashboard%22%2C%7B%22children%22%3A%5B%22__PAGE__%22%2C%7B%7D%2C%22%2Fdashboard%22%2C%22refresh%22%5D%7D%5D%7D%5D";
 
 // ── HELPERS ─────────────────────────────────────────────────
 function timeUntil(nextTime) {
@@ -28,65 +27,82 @@ function timeUntil(nextTime) {
 }
 
 // ── CHECK-IN ─────────────────────────────────────────────────
-async function doCheckin(authToken) {
-  // Body của Server Action: array JSON với URL + options
-  const body = JSON.stringify([
-    `${BASE_URL}/api/v1/user/daily-login/claim`,
-    { auth: true, method: "POST" }
-  ]);
+async function doCheckin(page, authToken) {
+  await humanDelay(300, 800);
 
-  const res = await fetch(`${BASE_URL}/dashboard`, {
-    method  : "POST",
-    headers : {
-      "accept"               : "text/x-component",
-      "content-type"         : "text/plain;charset=UTF-8",
-      "cookie"               : `auth-token=${authToken}`,
-      "next-action"          : CHECKIN_ACTION,
-      "next-router-state-tree": ROUTER_STATE,
-      "origin"               : BASE_URL,
-      "referer"              : `${BASE_URL}/dashboard`,
-      "user-agent"           : "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36",
-    },
-    body,
+  // Intercept đúng request Server Action check-in
+  // Browser tự gửi — đúng TLS fingerprint, đúng Cloudflare cookie
+  const responseData = await new Promise(async (resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error("Checkin timeout 15s")), 15_000);
+
+    // Lắng nghe response từ Server Action
+    page.once("response", async (response) => {
+      if (
+        response.url().includes("/dashboard") &&
+        response.request().method() === "POST" &&
+        response.request().headers()["next-action"] === CHECKIN_ACTION
+      ) {
+        clearTimeout(timeout);
+        try {
+          const text = await response.text();
+          resolve({ status: response.status(), text });
+        } catch (err) {
+          reject(err);
+        }
+      }
+    });
+
+    // Trigger Server Action bằng cách inject script vào page
+    await page.evaluate(async ({ baseUrl, action }) => {
+      await fetch(`${baseUrl}/dashboard`, {
+        method  : "POST",
+        headers : {
+          "accept"               : "text/x-component",
+          "content-type"         : "text/plain;charset=UTF-8",
+          "next-action"          : action,
+          "next-router-state-tree": encodeURIComponent(JSON.stringify(["","",{"children":["dashboard",{"children":["__PAGE__",{}]}]}])),
+        },
+        body: JSON.stringify([
+          `${baseUrl}/api/v1/user/daily-login/claim`,
+          { auth: true, method: "POST" }
+        ]),
+      });
+    }, { baseUrl: BASE_URL, action: CHECKIN_ACTION });
   });
 
-  const text = await res.text();
+  const { status, text } = responseData;
 
-  if (res.status === 401 || res.status === 403) {
-    log(PLATFORM, "❌ Token hết hạn hoặc không hợp lệ (401/403)", "error");
+  if (status === 401 || status === 403) {
+    log(PLATFORM, "❌ Token hết hạn (401/403)", "error");
     return { success: false, reason: "auth_expired" };
   }
 
-  if (res.status === 429) {
-    log(PLATFORM, "⏳ Rate limited (429) — thử lại sau", "warn");
+  if (status === 429) {
+    log(PLATFORM, "⏳ Rate limited (429)", "warn");
     return { success: false, reason: "rate_limited" };
   }
 
-  // Next.js trả về dạng: 1:["$","div",null,{...}]
-  // Tìm JSON data trong response text
+  // Parse JSON data từ RSC response
   let data = null;
   try {
-    // Tìm object JSON lồng trong RSC response
     const match = text.match(/\{[^{}]*"(?:message|success|error|reward|points|nextClaimAt|already)[^{}]*\}/);
     if (match) data = JSON.parse(match[0]);
   } catch { /* ignore */ }
 
-  // Log raw nếu không parse được để debug
   if (!data) {
-    log(PLATFORM, `📦 Raw response (200 chars): ${text.slice(0, 200)}`, "info");
+    log(PLATFORM, `📦 Raw (200 chars): ${text.slice(0, 200)}`, "info");
   }
 
   // Đã claim rồi
   if (
-    text.includes("already") ||
-    text.includes("Already") ||
+    text.toLowerCase().includes("already") ||
     data?.already ||
     data?.message?.toLowerCase().includes("already")
   ) {
     const nextTime =
-      data?.nextClaimAt    ??
-      data?.next_claim_at  ??
-      data?.nextLoginTime  ??
+      data?.nextClaimAt   ??
+      data?.next_claim_at ??
+      data?.nextLoginTime ??
       null;
 
     if (nextTime) {
@@ -97,26 +113,49 @@ async function doCheckin(authToken) {
     return { success: false, reason: "already_claimed", data };
   }
 
-  if (res.ok) {
+  if (status >= 200 && status < 300) {
     const reward = data?.reward ?? data?.points ?? data?.tokens ?? "";
     log(PLATFORM, `✅ Check-in thành công${reward ? ` — Nhận: ${reward}` : ""}`, "success");
     return { success: true, data };
   }
 
-  log(PLATFORM, `⚠️ Response ${res.status}: ${text.slice(0, 200)}`, "warn");
+  log(PLATFORM, `⚠️ Response ${status}: ${text.slice(0, 200)}`, "warn");
   return { success: false, reason: "unknown" };
 }
 
 // ── MAIN ─────────────────────────────────────────────────────
 export async function run() {
+  let context, page;
   try {
     const auth = getAuth(PLATFORM);
-    log(PLATFORM, "🚀 Bắt đầu check-in cedomis.xyz ...", "info");
+    log(PLATFORM, "🚀 Khởi động check-in cedomis.xyz ...", "info");
 
-    // auth.value = giá trị cookie auth-token
-    const authToken = auth.value ?? auth.token ?? auth.cookie ?? auth;
+    context = await createContext();
+    page    = await createPage(context);
 
-    const result = await doCheckin(authToken);
+    // Set cookie auth-token trước khi mở trang
+    await context.addCookies([{
+      name    : "auth-token",
+      value   : auth.value,
+      domain  : "cedomis.xyz",
+      path    : "/",
+      httpOnly: true,
+      secure  : true,
+    }]);
+
+    // Mở dashboard — browser thật với cookie thật → pass Cloudflare
+    log(PLATFORM, "📄 Đang mở dashboard ...", "info");
+    await page.goto(`${BASE_URL}/dashboard`, {
+      waitUntil: "domcontentloaded",
+      timeout  : 30_000,
+    });
+
+    // Scroll nhẹ cho tự nhiên
+    await page.mouse.wheel(0, 150 + Math.random() * 100);
+    await humanDelay(1500, 3000);
+
+    // Check-in
+    const result = await doCheckin(page, auth.value);
     logResult(PLATFORM, result.success, result.reason ?? result.data);
 
     return {
@@ -129,6 +168,9 @@ export async function run() {
     log(PLATFORM, `💥 Lỗi: ${err.message}`, "error");
     logResult(PLATFORM, false, err.message);
     return { success: false, platform: PLATFORM, reason: err.message };
+
+  } finally {
+    if (context) await context.close().catch(() => {});
   }
 }
 
@@ -136,20 +178,10 @@ export async function run() {
 // SETUP — cookies.txt
 // ============================================================
 //
-// Thêm vào cookies.txt:
 //   cedomis=eyJhbGci...
 //
-// Cách lấy auth-token:
-//   1. Vào https://cedomis.xyz/dashboard (đã login)
-//   2. F12 → Application → Cookies → cedomis.xyz
-//   3. Tìm "auth-token" → copy Value
-//   4. Dán: cedomis=<value đó>
-//
-// Lưu ý:
-//   - File này KHÔNG dùng Playwright (không cần browser)
-//   - Gọi thẳng HTTP từ Node.js → nhanh hơn, ổn định hơn
-//   - Nếu CHECKIN_ACTION thay đổi, lấy lại từ DevTools →
-//     Network → click request POST /dashboard → Request Headers → Next-Action
+// Cách lấy:
+//   F12 → Application → Cookies → cedomis.xyz → auth-token → copy Value
 //
 // Chạy:
 //   node index.js cedomis
